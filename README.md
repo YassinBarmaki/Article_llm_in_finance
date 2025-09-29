@@ -11,7 +11,7 @@ outperforms ablations (No-RAG, No-Forecast, No-Sentiment) on both linguistic and
 baselines (MAPE for TSE; RMSE for NYSE) while remaining interpretable and fast. The entire pipeline runs on commodity resources (Google Colab Pro and paid API
 access), writes run manifests and evidence logs for audit, and exposes configuration via environment variables (e.g., FAISS_PATH=./data/faiss_dual_market).
 By combining grounded generation, transparent retrieval, and lightweight quantitative modeling, the framework delivers bilingual, cross-market analyses that are
-accurate, auditable, and reproducible—offering a practical foundation for trustworthy financial AI in both emerging and developed markets.
+accurate, auditable, and reproducible offering a practical foundation for trustworthy financial AI in both emerging and developed markets.
 
 Keywords: Large language models (LLMs); Generative AI; Retrieval-Augmented Generation; FAISS; bilingual NLP; financial forecasting; ARIMA; GARCH; FinBERT;
 ParsBERT; Fact-Score+; Tehran Stock Exchange (TSE); New York Stock Exchange (NYSE).
