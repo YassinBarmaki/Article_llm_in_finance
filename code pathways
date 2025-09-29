@@ -1,0 +1,280 @@
+Appendix (Plain Text)
+A. Reproducibility, Artifacts, and How to Re-Run
+A.1. Repository layout (high level)
+/app_dual_market.py            # UI + orchestration (Analyze / Sensitivity / Ablation / Export)
+/rag_experiment_runner.py      # Experiment runner (sweeps; grids; scorer CLI; exports)
+/retrieval/ SimpleFaissStore   # FAISS index build/search
+/metrics/ FactScorerPlus       # Fact-Score+ implementation + ROC/PR/CI utilities
+/sentiment/ BilingualSentiment # FinBERT (EN), ParsBERT (FA) with confidence gating
+/rlhf/ RewardScorer, DPO/      # Best-of-N re-ranking; DPO + LoRA scripts
+/export/                        # CSV/LaTeX/PDF writers, figure builders
+/config/ *.yaml                 # Environment/config presets (paths, knobs)
+/data/                          # (User-provided) corpora; FAISS shards; market CSVs
+/out/ (OUT_DIR)                 # Manifests, tables, logs, figures (created on run)
+A.2. Environment and hardware
+•	Tested on Google Colab Pro (CUDA T4/P100; 16–25 GB RAM).
+•	Python ≥ 3.10.
+•	FAISS CPU; OpenAI embeddings/LLM (optional with OPENAI_API_KEY).
+•	4/8-bit loading supported for small adapters (LoRA/DPO).
+Tip: if the OpenAI API is unavailable, fallback to multilingual MiniLM embeddings for cross-lingual retrieval and to the constrained Fact-Score+ thresholds (see C.5).
+A.3. Configuration (key env vars)
+OPENAI_API_KEY=...            # optional; enables embeddings/LLM
+DATA_DIR=./data               # raw/clean corpora
+OUT_DIR=./out                 # all exports/manifests go here
+FAISS_PATH=./data/faiss_dual_market
+DEFAULT_LANG=auto             # {auto|en|fa}
+GLOBAL_SEED=42
+
+# TSE ingestion
+TSE_EXCEL_PATH=./data/full_analysis5.xlsx
+TSE_TICKER_COL=Ticker
+TSE_DATE_COL=Date
+TSE_PRICE_COL=Close
+
+# Runtime knobs
+USE_RAG=true
+TOP_K=5
+TEMPERATURE=0.2
+CONTEXT_LEN=3072
+LANG_ROUTE=auto               # {auto|fa|en}
+EVAL_QUERIES_PATH=./data/eval_queries.csv
+A.4. Run manifest schema (per execution)
+Every Analyze/Sensitivity/Ablation call appends a JSON manifest to OUT_DIR/run_*.json:
+{
+  "run_id": "...", "timestamp": "...", "seed": 42,
+  "window": {"start": "2024-07-01", "end": "2024-12-31"},
+  "retrieval": {"faiss_path": "./data/faiss_dual_market", "top_k": 5},
+  "decoding": {"temperature": 0.2, "p": 0.9, "context_len": 3072},
+  "query": {"text": "...", "lang_detected": "fa|en"},
+  "evidence": [
+    {"doc_id": "...", "source": "SEC|TSETMC|News", "date": "YYYY-MM-DD", "score": 0.78, "snippet": "..."},
+    ...
+  ],
+  "metrics": {
+    "fact_score_plus": 89.5,
+    "scoring_mode": "prod|fallback|prior",
+    "evidence_k": 5
+  },
+  "timewall_audit": {"passed": true, "violations": 0}
+}
+A.5. Generated files and where to find them
+•	OUT_DIR/retrieval_eval_summary.csv, retrieval_eval_details.csv (Hit@k, novelty).
+•	OUT_DIR/*ablation*.csv, *sensitivity*.csv (grids; mean±sd; per-cell).
+•	OUT_DIR/human_labels.csv (two-rater sentence labels: supported/partial/unsupported).
+•	OUT_DIR/paper_fill_values.json|csv (κ, ROC/AUPR, ρ, Hit@k, novelty, ΔRAG, ΔRLHF, time-wall).
+•	OUT_DIR/run_*.json (per-run manifests).
+•	OUT_DIR/fig_* and exported PDFs.
+A.6. One-command regenerations (Figures/Tables)
+•	ROC/PR sweeps + bootstrap CIs (Fig. 5a/5b; A.6–A.7):
+python rag_experiment_runner.py \
+  --roc_sweep --bootstrap_ci \
+  --eval_labels OUT_DIR/human_labels.csv \
+  --out OUT_DIR
+•	Headline tables (Table 2; language + forecast + Fact-Score+):
+python rag_experiment_runner.py \
+  --run_headline_tables --out OUT_DIR
+•	Retrieval evaluation (Hit@k, novelty; S1/Supp):
+python rag_experiment_runner.py \
+  --evaluate_retrieval --out OUT_DIR
+•	Backtest (Table 3; proof-of-concept):
+python rag_experiment_runner.py \
+  --backtest_demo --out OUT_DIR
+A.7. Statistical procedures (as implemented)
+•	Paired t-tests with Holm–Bonferroni correction across families of comparisons.
+•	Bootstrap 95% CIs (BCa where applicable; 5,000 resamples by default).
+•	Non-normal contrasts → Wilcoxon signed-rank (two-sided).
+•	ROC–AUC / AUPR computed at sentence-level against human labels; knee-point selected by F1 max subject to precision floor.
+•	Spearman ρ with bootstrap CI for construct validity.
+•	Time-wall audit: strict predicate evidence.date ≤ query_time.
+________________________________________
+B. Human Annotation Protocol (Codebook and Process)
+B.1. Task
+Annotate each generated sentence with respect to the retrieved snippets cited in the answer.
+B.2. Labels (concise codebook)
+•	Supported: claim is directly evidenced by at least one retrieved snippet (same figure, date, entity; short quote present or a close paraphrase that preserves numbers).
+•	Partially supported: qualitatively consistent but misses a number/condition/scope OR combines multiple snippets where one key element is not present verbatim.
+•	Unsupported: claim not evidenced by any retrieved snippet (wrong number/date/entity), or relies on general knowledge without cited support.
+Edge-cases clarified during calibration:
+•	Aggregation across snippets allowed only when all critical numerics appear somewhere in evidence.
+•	Quotes of 8–18 words are preferred when numbers are central.
+•	If evidence is thin, raters favor Unsupported unless the sentence is explicitly hedged or abstains.
+B.3. Process
+•	Two raters; pilot calibration (20 items) → clarification of paraphrase rules.
+•	Independent annotation; disagreements not forced to consensus (we keep raw κ).
+•	Final dataset size: N = 900 sentences.
+B.4. Quality controls
+•	Random spot checks for entity/date consistency.
+•	Automatic flags when no citations present; those sentences default to high scrutiny.
+B.5. Results (mirrors main text)
+•	Agreement 30.8%, Cohen’s κ = 0.064 (95% CI [0.048, 0.081]).
+•	ROC–AUC = 0.999, AUPR = 0.981 for predicting “supported” using Fact-Score+.
+•	Spearman’s ρ = 0.389 (95% CI [0.315, 0.455]) between Fact-Score+ and Supported.
+________________________________________
+C. Fact-Score+ Details
+C.1. Preprocessing
+•	Sentence segmentation (English/Persian aware).
+•	Case/spacing normalization; Persian/Arabic digit unification.
+C.2. Signals
+•	Token overlap: normalized, stem-aware Jaccard-like score.
+•	Embedding cosine: MiniLM sentence embeddings (cosine on L2-normed vectors).
+•	NLI entailment: RoBERTa-MNLI probability of entailment.
+C.3. Decision rule
+•	Production thresholds (preregistered): overlap ≥ 0.65, cosine ≥ 0.78, NLI ≥ 0.75.
+•	Majority vote among available signals → sentence is factual.
+•	Prior mode: if evidence set E is empty, return prior 0.62 (bounded [0.45, 0.80]) and log mode=prior.
+C.4. Outputs
+Per sentence: {overlap, cosine, nli, factual, evidence_preview}; plus overall Fact-Score+ (0–100).
+C.5. Constrained-environment fallback
+•	Thresholds relaxed to 0.35 / 0.60 / 0.60 (overlap/cosine/NLI) if models unavailable/OOM; mode logged as fallback.
+C.6. Calibration and sweeps (A.6–A.7)
+•	Sweeps over thresholds produce ROC/PR grids; knee selected for F1 subject to precision floor.
+•	Confusion matrices and calibration reliability diagrams are exported to OUT_DIR.
+________________________________________
+D. Retrieval Evaluation Details
+D.1. Metrics
+•	Hit@k: fraction of queries where at least one ground-truth snippet is in the top-k.
+•	Novelty: 1 − average pairwise cosine among returned snippets (higher → more diverse).
+D.2. Procedure
+•	Labeled keyword suite (held-out; smoke-test size).
+•	FAISS search with top_k ∈ {1,5}; compute Hit@k, novelty at k=5.
+D.3. Results (current run)
+•	Hit@5 = 1.00, novelty = 0.40 overall; NYSE Hit@5 = 1.00.
+•	Misses in broader runs typically involve numerically specific claims (guidance figures) rather than off-topic retrieval.
+D.4. Artifacts
+•	retrieval_eval_summary.csv (aggregates), retrieval_eval_details.csv (per-query).
+________________________________________
+E. Prompt Templates and Guardrails
+E.1. English prompt (core)
+Role: Senior financial analyst.
+Task: Answer the user’s question grounded in the evidence below. 
+Cite evidence using [EVIDENCE i] tags and include TWO short verbatim quotes (8–18 words) when evidence exists.
+
+Evidence (IDs, dates, snippets):
+[EVIDENCE 1] (YYYY-MM-DD): "..."
+[EVIDENCE 2] (YYYY-MM-DD): "..."
+...
+
+Rules:
+- If evidence is insufficient or conflicting, explicitly state uncertainty or ABSTAIN.
+- Keep numbers faithful to quotes; do not speculate beyond evidence.
+- Show RSI/MACD/ARIMA/GARCH highlights briefly when relevant.
+E.2. Persian prompt (core)
+نقش: تحلیل‌گر ارشد مالی.
+وظیفه: بر اساس شواهد زیر پاسخ بده. شواهد را با برچسب‌های [EVIDENCE i] ارجاع بده
+و اگر شواهد وجود دارد دو نقل‌قول کوتاه ۸ تا ۱۸ کلمه‌ای بیاور.
+
+قواعد:
+- اگر شواهد ناکافی/متناقض بود، عدم قطعیت را صریح بگو یا از پاسخ صرف‌نظر کن.
+- اعداد باید مطابق نقل‌قول‌ها باشند؛ فراتر از شواهد حدس نزن.
+E.3. Quote-injection and abstention
+•	Evidence block is always injected with IDs and dates.
+•	If max_score < threshold or coverage is weak, answer path flips to abstention template.
+________________________________________
+F. RLHF and DPO Details
+F.1. Best-of-N re-ranking
+•	Generate N=4 candidates at jittered temperatures (e.g., 0.0–0.6).
+•	Score each with RewardScorer (RM or heuristic) and blend with factuality:
+final_score = 0.85 * reward + 0.15 * (FactScorePlus / 100)
+•	Select argmax; log all candidate scores.
+Observed effect (current logs): Δ Fact-Score+ = −1.25 pp (N_RLHF=10 vs N_BASE=339).
+F.2. Heuristic RewardScorer (fallback)
+•	Features: numeric density, citation density, quote count (8–18 words), redundancy penalty, length sanity window.
+•	Calibrated to reward evidence discipline rather than style alone.
+F.3. DPO + LoRA (compact policy)
+•	Build triplets (prompt_with_evidence, chosen, rejected) from outputs/prefs.jsonl.
+•	Train Tiny policy (e.g., OPT-1.3B) with TRL-DPO, 4/8-bit, LoRA.
+•	Save adapter/tokenizer; log seeds/configs.
+RLHF/DPO kept off for headline tables; used for exploratory polishing only.
+________________________________________
+G. Classical Forecasting Line
+G.1. Models and parameters
+•	ARIMA(5,1,0) (trend); GARCH(1,1) on residuals (volatility).
+•	RSI(14), MACD(12/26 EMA) computed on aligned daily bars.
+G.2. Adequacy checks (optionally surfaced to UI logs)
+•	ADF/KPSS stationarity checks; AIC/BIC over small grids; Ljung-Box (whiteness); ARCH–LM (heteroskedasticity).
+G.3. Protocol
+•	Rolling origin; MAPE for TSE, RMSE for NYSE on disjoint windows.
+•	Short series fallback for < 50 points (flagged in diagnostics).
+________________________________________
+H. Extended Baselines (Numeric-Only)
+H.1. Prophet
+•	Daily seasonality on; changepoint prior tuned by 3-point grid.
+H.2. LSTM (compact Keras)
+•	Single layer (32–64), lookback 30–60, dropout 0.1–0.2.
+H.3. TFT / N-BEATS / PatchTST
+•	Use reference hyper-params scaled to data volume; report training steps, patience, and seeds.
+Baselines serve as numeric comparators; they do not replace RAG.
+________________________________________
+I. Supplementary Tables
+Table S1. Coverage by source and ticker (schema)
+market, ticker, n_docs, n_rows_time_series, median_tokens, first_date, last_date
+TSE, <SYM>, <int>, <int>, 128, YYYY-MM-DD, YYYY-MM-DD
+NYSE, <SYM>, <int>, <int>, 128, YYYY-MM-DD, YYYY-MM-DD
+...
+(Current run aggregates: TSE 55 symbols / ~1,800 docs, NYSE 25 / ~3,000; median tokens/doc ≈ 128.)
+Table S2. Time-wall audit summary
+n_manifests=339; post_date_citations=0; no_leak_rate=100.0%
+________________________________________
+J. Error-Case Gallery (abbreviated)
+1.	No-RAG hallucination (unsupported guidance):
+– Claim: “Q2 guidance raised to 12–14%.”
+– Evidence: none in retrieved snippets → Unsupported; RAG version quotes the filing with the exact range and date.
+2.	Paraphrase drift with sparse quoting:
+– Claim restates a filing but drops a qualifier (e.g., “excluding FX”).
+– Fact-Score+: overlap passes, NLI borderline; human label Partial. Prompt now forces two short quotes to anchor qualifiers.
+3.	On-topic but numerically off-target retrieval:
+– Snippets mention the right entity but different fiscal period.
+– Hit@5 OK; novelty OK; Fact-Score+ penalizes due to number mismatch; abstention encouraged.
+________________________________________
+K. Latency and Cost Breakdown
+•	FAISS lookup: < 100 ms/query (CPU/T4).
+•	End-to-end Analyze: ≤ 2.5 s (steady state; dominated by LLM + charts).
+•	RLHF Best-of-N: ~N× decoding cost (N default = 4); kept off in headline runs.
+•	DPO/LoRA: single consumer GPU; 4/8-bit loading to cap memory.
+________________________________________
+L. Security and Prompt-Injection Notes
+•	Restrict outputs to retrieved content; require quotes with IDs/dates.
+•	Lower temperature for long contexts; strip suspicious tokens in evidence.
+•	For production: add entity allow-lists, sanitize strings before rendering, and log all external inputs.
+________________________________________
+M. Data Cards (Abbreviated)
+•	SEC filings/news (NYSE): public documents; used identifiers + derived features only.
+•	TSETMC disclosures (TSE): public text/figures; Jalali→Gregorian conversion when available.
+•	Yahoo Finance: public daily OHLCV; close used for evaluation.
+•	Licensing/Privacy: public sources; no personal data ingested or stored.
+________________________________________
+N. “How-To” Quickstart (end-to-end)
+1.	Prepare data
+o	Place TSE Excel/CSVs and NYSE price files under DATA_DIR.
+o	Set TSE_EXCEL_PATH and column names if non-default.
+2.	Build / refresh the FAISS index (from UI or script)
+o	Ensure embeddings are enabled (OpenAI) or fallback to MiniLM.
+o	Index stored at FAISS_PATH.
+3.	Run Analyze (UI)
+o	Select market/ticker/prompt; view evidence with IDs; verify two quotes.
+o	Export PDF (evidence IDs appear as footnotes).
+4.	Run Sensitivity & Ablation
+o	Configure TOP_K, TEMPERATURE, CONTEXT_LEN; export CSV tables.
+5.	Scorer and figures
+o	Execute the commands in A.6 to regenerate ROC/PR plots and tables.
+________________________________________
+O. Glossary (selected)
+•	Hit@k: at least one ground-truth snippet among top-k retrieved.
+•	Novelty: diversity of retrieved snippets (1 − avg pairwise cosine).
+•	Fact-Score+: majority vote over overlap, cosine, NLI at preregistered thresholds; prior mode when no evidence.
+•	Time-wall: retrieval/evaluation restricted to documents/data dated ≤ query time.
+________________________________________
+P. Numbers cited in the paper (for audit)
+•	Human set: N = 900 sentences; agreement 30.8%; κ = 0.064 [0.048, 0.081].
+•	Operating: ROC–AUC = 0.999, AUPR = 0.981 (sentence-level).
+•	Construct validity: ρ = 0.389 [0.315, 0.455].
+•	Retrieval: Hit@5 = 1.00, novelty = 0.40; NYSE Hit@5 = 1.00.
+•	Time-wall audit: 339 manifests, 0 violations (100.0%).
+•	RLHF delta (heuristic RM): −1.25 pp vs. non-RLHF; headline tables keep RLHF off.
+•	Ablation artifact (one CSV): Full − No-RAG = −62.0 pp (flagged as small-N artifact).
+________________________________________
+Q. Contact and Release
+•	Source, configs, and sample datasets for reproducing tables/figures: https://github.com/YassinBarmaki
+•	A DOI-backed package with manifests and scorer settings will follow upon acceptance.
+________________________________________
+End of Appendix.
