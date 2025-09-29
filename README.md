@@ -1,5 +1,9 @@
 # Article_llm_in_finance
-Bilingual, Cross-Market Financial Analytics via Retrieval-Augmented Generation: Evidence Traceability and Factuality at Scale. Authors   - Mohammad Yasin Barmaki, Master of Information Technology Management, University of Tehran, Iran     Email: yassin.barmaki@ut.ac.ir 
+Bilingual, Cross-Market Financial Analytics via Retrieval-Augmented Generation: Evidence Traceability and Factuality at Scale. 
+Authors   
+Mohammad Yasin Barmaki, Master of Information Technology Management, University of Tehran, Iran     Email: yassin.barmaki@ut.ac.ir 
+Dr. Babak Sohrabi, Full Professor of Information Technology Management, University of Tehran, Iran    Email: bsouhrabi@ut.ac.ir
+
 Abstract
 We present a bilingual, retrieval-grounded framework for stock-market analysis across the Tehran Stock Exchange (TSE) and the New York Stock Exchange (NYSE).
 The system couples instruction-tuned GPT-4 with prompt guardrails to a Retrieval-Augmented Generation (RAG) pipeline over a FAISS index built from time-walled
